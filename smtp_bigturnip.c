@@ -13,6 +13,9 @@
  *	instead of using a single byte 0x09 where it makes sense.  Oh yeah, also provide some level of visceral
  *	feedback that we just hauled off and kicked a miscreant in the nards using TCP and /dev/random.
  *
+ *	Also add better directional logging because that's better than using TCPDump to watch the port.  I'm gonna feature
+ *	creep the hell out of this maybe.  Who knows.  Like me and follow me on Shitter peepz so I can pump my self esteem.
+ *
 */
 
 #include <stdio.h>
@@ -127,20 +130,23 @@ static int Validate_and_Log (int rc, char *response) {
 int main(void) {
 	//String reading
 	char response[4096];
-	int rc;
+	int rc = 0;
 
 	//Send the banner and get the response
+	if (Validate_and_Log(rc, "> 220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n") != 0) { return 1; }
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0) { return 1; }
 
 	//Did they even attempt to HELO or EHLO?
 	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL ){
+		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response) != 0) { return 1; }
 	}
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
 	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL ){
+		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
 		fflush(stdout);
 		return 1;
@@ -148,15 +154,18 @@ int main(void) {
 
 	//Did they EHLO instead of HELO?
 	if ( strstr(response, "EHLO ") != NULL ){
+		if (Validate_and_Log(rc, "> 250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n") != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response) != 0) { return 1; }
 	}
 
 	//After the EHLO/HELO get the next command, potentially RCPT TO
+	if (Validate_and_Log(rc, "> 250 localhost\n") != 0) { return 1; }
 	rc  = getLine("250 localhost\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0 ) { return 1; }
 
 	//Get the final command before telling them the system is busy, potentially MAIL FROM
+	if (Validate_and_Log(rc, "> SENDING ENTROPY FUMES\n") != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0) { return 1; }
 
@@ -168,11 +177,12 @@ int main(void) {
 
 	urandom = fopen("/dev/urandom", "r");
 	if (urandom != NULL) {
-		if (Validate_and_Log(rc, "SENDING ENTROPY FUMES\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "> Huff Entropy Engine Fumes Ya Bastard\n") != 0) { return 1; }
 		for(data_count = 0; data_count < 32; data_count++){
 			do {
 				random_data = fgetc(urandom);
 				printf("%c", random_data);
+				fflush(stdout);
 			} while (data_count != EOF);
 		}
 		fclose(urandom);
