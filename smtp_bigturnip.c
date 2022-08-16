@@ -1,12 +1,17 @@
 /* Nathan "Big Turnip" Fowler
  * Licensed under GPLv2
  * Compile with gcc -Wall -D_FORTIFY_SOURCE=2 -O2 -fPIE -pie -fstack-protector -o smtp_bigturnip smtp_bigturnip.c
- * Then strip debugging symbols via 'strip ./smtp_honeypot'
+ * Then strip debugging symbols via 'strip ./smtp_bigturnip'
  *
  * Aug 15 2022 - xinetd powered time-wasting SMTP system that instead of issuing an SMTP 354 Go Ahead after the DATA statement,
  * like a normal and sane MTA instead we'll just "hyperblast the connection that is unsolicited", as this isn't an actual MTA,
  * into another reality where the Internet doesn't get spam because the spam bots are not functional.  Basically, SPAM is just
  * random garbage data, so lets ... spam the spammer?
+ *
+ * Changelog
+ *      2022-08-16 - Use 0x09 where possible to piss off the people who prefer 0x20 four times, literally, four bytes of bloat
+ *	instead of using a single byte 0x09 where it makes sense.  Oh yeah, also provide some level of visceral
+ *	feedback that we just hauled off and kicked a miscreant in the nards using TCP and /dev/random.
  *
 */
 
@@ -163,6 +168,7 @@ int main(void) {
 
 	urandom = fopen("/dev/urandom", "r");
 	if (urandom != NULL) {
+		if (Validate_and_Log(rc, "SENDING ENTROPY FUMES\n") != 0) { return 1; }
 		for(data_count = 0; data_count < 32; data_count++){
 			do {
 				random_data = fgetc(urandom);
