@@ -138,14 +138,14 @@ int main(void) {
 	if (Validate_and_Log(rc, response) != 0) { return 1; }
 
 	//Did they even attempt to HELO or EHLO?
-	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL ){
+	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") ){
 		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response) != 0) { return 1; }
 	}
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
-	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL ){
+	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") ){
 		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
 		fflush(stdout);
@@ -153,7 +153,7 @@ int main(void) {
 	}
 
 	//Did they EHLO instead of HELO?
-	if ( strstr(response, "EHLO ") != NULL ){
+	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
 		if (Validate_and_Log(rc, "> 250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n") != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response) != 0) { return 1; }
@@ -164,8 +164,8 @@ int main(void) {
 	rc  = getLine("250 localhost\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0 ) { return 1; }
 
-	//Get the final command before telling them the system is busy, potentially MAIL FROM
-	if (Validate_and_Log(rc, "> SENDING ENTROPY FUMES\n") != 0) { return 1; }
+	//Get the final command before auto-starting the entropy engine, potentially MAIL FROM
+	if (Validate_and_Log(rc, "> 250 2.1.0 OK\n") != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0) { return 1; }
 
