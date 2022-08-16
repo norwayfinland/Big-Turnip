@@ -1,0 +1,37 @@
+#
+# 2022-08-16    NCF     Remember to edit /etc/default/xinetd to call this file, I wasted 1.5 hours on this.
+#
+service honeypot_bigturnip
+{
+        disable         = no
+        id              = honeypot_bigturnip
+        type            = UNLISTED
+        wait            = no
+        socket_type     = stream
+        protocol        = tcp
+
+        user            = daemon
+        group           = daemon
+        port            = 31338
+        server          = /honeypot/smtp_bigturnip
+
+        log_type        = SYSLOG daemon
+        log_on_success  = PID HOST DURATION EXIT
+        log_on_failure  = HOST
+
+        flags           = NODELAY NOLIBWRAP IPv4
+        interface       = 0.0.0.0
+
+        cps             = 150 1
+        instances       = 4096
+        per_source      = 1024
+        deny_time       = 1
+
+        env             =
+        passenv         =
+        nice            = 19
+        umask           = 022
+        groups          = no
+
+        rlimit_as       = 128M
+}
