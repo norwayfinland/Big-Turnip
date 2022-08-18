@@ -26,7 +26,7 @@
  *
  *	Also added in proper logging for != OK syslogging to use SMTP 451 4.7.1 properly.
  *
- *	2022-08-18 - Additional feature creeping to make the log direction more discernable.
+ *	2022-08-18 - Additional feature creeping to make the log direction more discernable.  Also correct the repeated '250 localhost' seen after EHLO/HELO.
  *
 */
 
@@ -229,11 +229,11 @@ int main(void) {
 		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
-	//After the EHLO/HELO get the next command, potentially RCPT TO
+	//Get the next command before auto-starting the entropy engine, potentially RCPT TO
 	Random_Wait();
-	if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
-	rc  = getLine("250 localhost\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
+	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
+	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
