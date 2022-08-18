@@ -190,8 +190,7 @@ int main(void) {
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
-	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them some free data like a participation trophy so they feel
-	//better about themselves!
+	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them free data like a participation trophy so they feel better about themselves!
 	if ( strstr(response, "QUIT") != NULL || strstr(response,"RSET") != NULL || strstr(response, "quit") != NULL || strstr(response,"rset") != NULL ){
 		//The sun is hot, it hurts my eyes.  Script kiddies melt like snowflakes from the exhaust of the entropy engine.
 		Entropy_Engine();
@@ -216,14 +215,13 @@ int main(void) {
 	}
 
 	//Did they EHLO instead of HELO?
+	Random_Wait();
 	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
-		Random_Wait();
 		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
-	//Must be a HELO then
 	}else{
-		Random_Wait();
+	//Must be a HELO then
 		if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
 		rc  = getLine("250 localhost\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
