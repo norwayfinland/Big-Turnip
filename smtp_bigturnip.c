@@ -26,6 +26,8 @@
  *
  *	Also added in proper logging for != OK syslogging to use SMTP 451 4.7.1 properly.
  *
+ *	2022-08-18 - Additional feature creeping to make the log direction more discernable.
+ *
 */
 
 #include <stdio.h>
@@ -85,31 +87,31 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 	return OK;
 }
 
-static int Validate_and_Log (int rc, char *response) {
+static int Validate_and_Log (int rc, char *response, int is_outbound) {
 	//Validation and error handling
 	if ( rc != OK ){
 		if ( rc == NO_INPUT ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "+ *** NO CARRIER ***");
+			syslog(LOG_NOTICE, "< %s", "*** NO CARRIER ***");
 			closelog();
 		}
 
 		if ( rc == TOO_LONG ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "! ***  INPUT CHARACTERS EXCEED BUFFER - LOOK AT PCAPS ****");
+			syslog(LOG_NOTICE, "< %s", "***  INPUT CHARACTERS EXCEED BUFFER - LOOK AT PCAPS ****");
 			closelog();
 		}
 
 		if ( rc == NOT_OK ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "! *** UNPRINTABLE CHARACTERS DETECTED - LOOK AT PCAPS ***");
+			syslog(LOG_NOTICE, "< %s", "*** UNPRINTABLE CHARACTERS DETECTED - LOOK AT PCAPS ***");
 			closelog();
 		}
 
 
 		//Error handling
 		openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-		syslog(LOG_NOTICE, "%s", "> 451 4.7.1 Service unavailable - try again later\n");
+		syslog(LOG_NOTICE, "> %s", "451 4.7.1 Service unavailable - try again later\n");
 		printf("451 4.7.1 Service unavailable - try again later\n");
 		fflush(stdout);
 		closelog();
@@ -118,7 +120,11 @@ static int Validate_and_Log (int rc, char *response) {
 
 	//Log the actual received response
 	openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-	syslog(LOG_NOTICE, "%s", response);
+	if ( is_outbound == 1 ) {
+		syslog(LOG_NOTICE, "> %s", response);
+	} else {
+		syslog(LOG_NOTICE, "< %s", response);
+	}
 	closelog();
 
 	//Allow the SMTP conversation to persist
@@ -157,7 +163,8 @@ static int Entropy_Engine(){
 
 	urandom = fopen("/dev/urandom", "r");
 	if (urandom != NULL) {
-		if (Validate_and_Log(rc, "> Huff Entropy Engine Fumes Ya Bastard\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "Huff Entropy Engine Fumes Ya Bastard\n", 1) != 0) { return 1; }
+		//Full disclosure here, I decided I liked the number 32 :)
 		for(data_count = 0; data_count < 32; data_count++){
 			do {
 				random_data = fgetc(urandom);
@@ -179,9 +186,9 @@ int main(void) {
 
 	//Send the banner and get the response
 	Random_Wait();
-	if (Validate_and_Log(rc, "> 220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n") != 0) { return 1; }
+	if (Validate_and_Log(rc, "220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", 1) != 0) { return 1; }
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response) != 0) { return 1; }
+	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them some free data like a participation trophy so they feel
 	//better about themselves!
@@ -194,15 +201,15 @@ int main(void) {
 	//Did they even attempt to HELO or EHLO?
 	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") == NULL ){
 		Random_Wait();
-		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));
-		if (Validate_and_Log(rc, response) != 0) { return 1; }
+		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 	}
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
 	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") == NULL ){
 		Random_Wait();
-		if (Validate_and_Log(rc, "> 502 5.5.2 Error: command not recognized\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
 		fflush(stdout);
 		return 1;
@@ -211,34 +218,34 @@ int main(void) {
 	//Did they EHLO instead of HELO?
 	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
 		Random_Wait();
-		if (Validate_and_Log(rc, "> 250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
-		if (Validate_and_Log(rc, response) != 0) { return 1; }
+		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 	//Must be a HELO then
 	}else{
 		Random_Wait();
-		if (Validate_and_Log(rc, "> 250 localhost\n") != 0) { return 1; }
+		if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
 		rc  = getLine("250 localhost\n", response, sizeof(response));
-		if (Validate_and_Log(rc, response) != 0 ) { return 1; }
+		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
 	//After the EHLO/HELO get the next command, potentially RCPT TO
 	Random_Wait();
-	if (Validate_and_Log(rc, "> 250 localhost\n") != 0) { return 1; }
+	if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
 	rc  = getLine("250 localhost\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response) != 0 ) { return 1; }
+	if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
-	if (Validate_and_Log(rc, "> 250 2.1.0 OK\n") != 0) { return 1; }
+	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response) != 0) { return 1; }
+	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
-	if (Validate_and_Log(rc, "> 250 2.1.0 OK\n") != 0) { return 1; }
+	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response) != 0) { return 1; }
+	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//If the connection is still here, lets assume they're jerks, and nard kick 'em with some Entropy.
 	Entropy_Engine();
