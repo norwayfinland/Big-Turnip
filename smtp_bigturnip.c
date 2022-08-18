@@ -20,6 +20,12 @@
  *
  *	Oh yeah, and like, change strstr() to stristr() cause reasons.  Oh nope, nevermind, C doesn't do that.  Oops.
  *
+ *	2022-08-17 - Correct boolean logic flaw in the conditional logic due to thinking like an actual turnip when handling
+ *	EHLO or HELO.  Additionally added some data harvesting expansion in the log engine as well as during the SMTP
+ *	transactions.
+ *
+ *	Also added in proper logging for != OK syslogging to use SMTP 451 4.7.1 properly.
+ *
 */
 
 #include <stdio.h>
@@ -55,8 +61,7 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 		return (extra == 1) ? TOO_LONG: OK;
 	}
 
-	//Make sure only printed is returned
-	// \0 terminated string, then \n
+	//Make sure only printed is returned \0 terminated string, then \n
 	for(ch=0; ch<strlen(buff); ch++){
 		//Debug
 		//printf("%x\n", buff[ch] & 0xff);
@@ -85,24 +90,29 @@ static int Validate_and_Log (int rc, char *response) {
 	if ( rc != OK ){
 		if ( rc == NO_INPUT ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "*** NO INPUT DETECTED");
+			syslog(LOG_NOTICE, "%s", "+ *** NO CARRIER ***");
 			closelog();
 		}
 
 		if ( rc == TOO_LONG ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "*** POTENTIAL BOF - TOO MANY CHARACTERS DETECTED");
+			syslog(LOG_NOTICE, "%s", "! ***  INPUT CHARACTERS EXCEED BUFFER - LOOK AT PCAPS ****");
 			closelog();
 		}
 
 		if ( rc == NOT_OK ){
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
-			syslog(LOG_NOTICE, "%s", "*** UNPRINTABLE CHARACTERS DETECTED");
+			syslog(LOG_NOTICE, "%s", "! *** UNPRINTABLE CHARACTERS DETECTED - LOOK AT PCAPS ***");
 			closelog();
 		}
 
-		printf("502 5.5.2 Error: command not recognized\n");
+
+		//Error handling
+		openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
+		syslog(LOG_NOTICE, "%s", "> 451 4.7.1 Service unavailable - try again later\n");
+		printf("451 4.7.1 Service unavailable - try again later\n");
 		fflush(stdout);
+		closelog();
 		return 1;
 	}
 
@@ -199,11 +209,17 @@ int main(void) {
 	}
 
 	//Did they EHLO instead of HELO?
-	if ( strstr(response, "EHLO ") != NULL && strstr(response, "ehlo ") != NULL ){
+	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
 		Random_Wait();
 		if (Validate_and_Log(rc, "> 250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n") != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
 		if (Validate_and_Log(rc, response) != 0) { return 1; }
+	//Must be a HELO then
+	}else{
+		Random_Wait();
+		if (Validate_and_Log(rc, "> 250 localhost\n") != 0) { return 1; }
+		rc  = getLine("250 localhost\n", response, sizeof(response));
+		if (Validate_and_Log(rc, response) != 0 ) { return 1; }
 	}
 
 	//After the EHLO/HELO get the next command, potentially RCPT TO
@@ -212,7 +228,13 @@ int main(void) {
 	rc  = getLine("250 localhost\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response) != 0 ) { return 1; }
 
-	//Get the final command before auto-starting the entropy engine, potentially MAIL FROM
+	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
+	Random_Wait();
+	if (Validate_and_Log(rc, "> 250 2.1.0 OK\n") != 0) { return 1; }
+	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
+	if (Validate_and_Log(rc, response) != 0) { return 1; }
+
+	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
 	if (Validate_and_Log(rc, "> 250 2.1.0 OK\n") != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
