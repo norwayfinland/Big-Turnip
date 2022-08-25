@@ -28,6 +28,8 @@
  *
  *	2022-08-18 - Additional feature creeping to make the log direction more discernable.  Also correct the repeated '250 localhost' seen after EHLO/HELO.
  *
+ *	2022-08-25 - Adjustments to serial execution conditional logic
+ *
 */
 
 #include <stdio.h>
@@ -201,7 +203,7 @@ int main(void) {
 	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") == NULL ){
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
-		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));
+		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));	//Give them another chance to issue a valid SMTP command
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 	}
 
@@ -214,35 +216,29 @@ int main(void) {
 		return 1;
 	}
 
-	//Did they EHLO instead of HELO?
+	//Did they EHLO instead of HELO?  Get the next line potentially RCPT TO
 	Random_Wait();
 	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
 		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
-		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));
+		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 	}else{
-	//Must be a HELO then
+	//Must be a HELO then, get the next line potentially RCPT TO
 		if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
-		rc  = getLine("250 localhost\n", response, sizeof(response));
+		rc  = getLine("250 localhost\n", response, sizeof(response));														//Likely RCPT TO
 		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
-
-	//Get the next command before auto-starting the entropy engine, potentially RCPT TO
-	Random_Wait();
-	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
-	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
 	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
-	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
+	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));															//Likely MAIL FROM
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
 	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
-	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));
+	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));															//Likely DATA or BDAT
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
 	//If the connection is still here, lets assume they're jerks, and nard kick 'em with some Entropy.
