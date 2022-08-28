@@ -27,8 +27,12 @@
  *	Also added in proper logging for != OK syslogging to use SMTP 451 4.7.1 properly.
  *
  *	2022-08-18 - Additional feature creeping to make the log direction more discernable.  Also correct the repeated '250 localhost' seen after EHLO/HELO.
- *
  *	2022-08-25 - Adjustments to serial execution conditional logic
+ *	2022-08-28 - Add in RSET handling and use toupper() to avoid the lack of stristr() in C
+ *		   - Fix OCD flare-ups
+ *		   - Working around 'warning: function returns address of local variable [-Wreturn-local-addr]' was a bitch.
+ *		   - Education by failure, the best teacher, of all sessons.  Today I learned about strupr() and then I found it that it's not standard!  LOL!
+ *		   - Looks stable now, learned a ton today about C pointers and memory allocation.  I am a REAL BOY now!  Yay!
  *
 */
 
@@ -45,11 +49,14 @@
 #define TOO_LONG	2
 #define NOT_OK		3
 
+#define MAX_BYTES	4096
+
 static int getLine( char *prompt, char *buff, size_t sz) {
-	int ch, extra;
+	int ch		= 0;
+	int extra	= 0;
 
 	//Get line with buffer overflow protection
-	if ( prompt != NULL ){
+	if ( prompt != NULL ) {
 		printf("%s", prompt);
 		fflush(stdout);
 	}
@@ -58,29 +65,28 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 		return NO_INPUT;
 
 	//Flush to newline and indicate it was too long
-	if (buff[strlen(buff)-1] != '\n'){
+	if (buff[strlen(buff)-1] != '\n') {
 		extra = 0;
-		while( ((ch = getchar()) != '\n') && (ch != EOF) )
-			extra = 1;
+		while( ((ch = getchar()) != '\n') && (ch != EOF) ) { extra = 1; }
 		return (extra == 1) ? TOO_LONG: OK;
 	}
 
 	//Make sure only printed is returned \0 terminated string, then \n
-	for(ch=0; ch<strlen(buff); ch++){
+	for(ch=0; ch<strlen(buff); ch++) {
 		//Debug
 		//printf("%x\n", buff[ch] & 0xff);
 
 		//Turn all CR into LF
-		if ( buff[ch] == '\r' ){
+		if ( buff[ch] == '\r' ) {
 			buff[ch] = '\n';
 
 			//Terminate the string at the first CR or the replaced CR->LF
-			if ( ch < strlen(buff) ){ buff[ch+1] = '\0'; }
+			if ( ch < strlen(buff) ) { buff[ch+1] = '\0'; }
 		}
 
 		//Throw an error if it's not printable, permit newline.
-		if ( buff[ch] != '\n' ){
-			if ( isprint(buff[ch]) == 0 ){ return NOT_OK; }
+		if ( buff[ch] != '\n' ) {
+			if ( isprint(buff[ch]) == 0 ) { return NOT_OK; }
 		}
 	}
 
@@ -91,20 +97,20 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 
 static int Validate_and_Log (int rc, char *response, int is_outbound) {
 	//Validation and error handling
-	if ( rc != OK ){
-		if ( rc == NO_INPUT ){
+	if ( rc != OK ) {
+		if ( rc == NO_INPUT ) {
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
 			syslog(LOG_NOTICE, "< %s", "*** NO CARRIER ***");
 			closelog();
 		}
 
-		if ( rc == TOO_LONG ){
+		if ( rc == TOO_LONG ) {
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
 			syslog(LOG_NOTICE, "< %s", "***  INPUT CHARACTERS EXCEED BUFFER - LOOK AT PCAPS ****");
 			closelog();
 		}
 
-		if ( rc == NOT_OK ){
+		if ( rc == NOT_OK ) {
 			openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
 			syslog(LOG_NOTICE, "< %s", "*** UNPRINTABLE CHARACTERS DETECTED - LOOK AT PCAPS ***");
 			closelog();
@@ -133,17 +139,17 @@ static int Validate_and_Log (int rc, char *response, int is_outbound) {
 	return 0;
 }
 
-static int Random_Wait(){
+static int Random_Wait() {
 	//Random Delay
 	FILE* urandom;
-	unsigned int seed;
-	int rnd_offset;
+	unsigned int seed	= 0;
+	int rnd_offset		= 0;
 
 	//Init rand()
 	srand((unsigned)time(NULL));
 	urandom = fopen("/dev/urandom", "r");
 	if (urandom != NULL) {
-		if( fread (&seed, sizeof(seed), 1, urandom) == 1 ){ srand(seed); }
+		if( fread (&seed, sizeof(seed), 1, urandom) == 1 ) { srand(seed); }
 		fclose(urandom);
 	}
 
@@ -155,19 +161,19 @@ static int Random_Wait(){
 	return 0;
 }
 
-static int Entropy_Engine(){
+static int Entropy_Engine() {
 	//Summon the chaos entropy engine output, where we stop, no one knows until we hit EOF.  There are no big bucks though, only whammies for miscreants.
 	//Not using feof() here because well, /dev/urandom is ... random.  No idea how big the buffer is until EOF so better to read a single character, I think.
 	FILE* urandom;
 	char random_data;
-	int data_count = 0;
-	int rc = 0;
+	int data_count	= 0;
+	int rc		= 0;
 
 	urandom = fopen("/dev/urandom", "r");
 	if (urandom != NULL) {
 		if (Validate_and_Log(rc, "Huff Entropy Engine Fumes Ya Bastard\n", 1) != 0) { return 1; }
 		//Full disclosure here, I decided I liked the number 32 :)
-		for(data_count = 0; data_count < 32; data_count++){
+		for(data_count = 0; data_count < 32; data_count++) {
 			do {
 				random_data = fgetc(urandom);
 				printf("%c", random_data);
@@ -183,8 +189,10 @@ static int Entropy_Engine(){
 
 int main(void) {
 	//String reading
-	char response[4096];
+	char response[MAX_BYTES]	= {0};
+	char u_response[MAX_BYTES]	= {0};
 	int rc = 0;
+	int uc = 0;
 
 	//Send the banner and get the response
 	Random_Wait();
@@ -192,23 +200,42 @@ int main(void) {
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
+	//Lets spend all day on a CS101 problem on converting a string to uppercase!
+	strncpy(u_response, response, sizeof(response));
+	for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
+
 	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them free data like a participation trophy so they feel better about themselves!
-	if ( strstr(response, "QUIT") != NULL || strstr(response,"RSET") != NULL || strstr(response, "quit") != NULL || strstr(response,"rset") != NULL ){
-		//The sun is hot, it hurts my eyes.  Script kiddies melt like snowflakes from the exhaust of the entropy engine.
+	if ( strstr(u_response, "QUIT") != NULL ) {
 		Entropy_Engine();
 		return 0;
 	}
 
+	//Did they issue a RSET?
+	if ( strstr(u_response, "RSET") != NULL ) {
+		Random_Wait();
+		if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+		rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));														//Likely MAIL FROM
+		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+
+		//Lets spend all day on a CS101 problem on converting a string to uppercase!
+		strncpy(u_response, response, sizeof(response));
+		for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
+	}
+
 	//Did they even attempt to HELO or EHLO?
-	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") == NULL ){
+	if ( strstr(u_response, "EHLO") == NULL && strstr(u_response, "HELO") == NULL ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));	//Give them another chance to issue a valid SMTP command
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+
+		//Lets spend all day on a CS101 problem on converting a string to uppercase!
+		strncpy(u_response, response, sizeof(response));
+		for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
 	}
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
-	if ( strstr(response, "EHLO ") == NULL && strstr(response,"HELO ") == NULL && strstr(response, "ehlo ") == NULL && strstr(response,"helo ") == NULL ){
+	if ( strstr(u_response, "EHLO") == NULL && strstr(u_response, "HELO") == NULL ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
@@ -218,7 +245,7 @@ int main(void) {
 
 	//Did they EHLO instead of HELO?  Get the next line potentially RCPT TO
 	Random_Wait();
-	if ( strstr(response, "EHLO ") != NULL || strstr(response, "ehlo ") != NULL ){
+	if ( strstr(u_response, "EHLO") != NULL ) {
 		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
