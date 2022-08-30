@@ -37,8 +37,12 @@
  *		   - Make debug easy
  *		   - Better RSET and QUIT handling
  *		   - Proper handling of needle and haystack ordering (doh!)
+ *		   - LOL, reading string.h to find out how to pass a NULL pointer and I found strcasestr().  EZ-PZ now?
  *
 */
+
+//We only run on FOSS
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <string.h>
@@ -193,30 +197,6 @@ static int Entropy_Engine() {
 	return 0;
 }
 
-//One day I will look back at this and laugh at myself, but hey, we all learn.
-static int b_stristr(char *haystack, char *needle){
-	char u_haystack[MAX_BYTES] = {0};
-	int uc = 0;
-
-	//Certainly the SMTP command is too long if it exceeds MAX_BYTES and this is just a just in case boundary check.
-	//sizeof() is the buffer size, strlen() is the filled buffer state.
-	if ( sizeof(haystack) <= MAX_BYTES && sizeof(needle) < MAX_BYTES && strlen(haystack) <= MAX_BYTES && strlen(needle) < MAX_BYTES ) {
-		//Perform a deep buffer-based copy based on transformation of haystack to upper case u_haystack
-		for( uc = 0; uc <= strlen(haystack); uc++ ){ u_haystack[uc] = toupper(haystack[uc]); }
-
-		if ( DEBUG == 1 ) {
-			printf("sizeof(haystack): %ld\nsizeof(u_haystack): %ld\n", sizeof(haystack), sizeof(u_haystack));
-			printf("strlen(haystack): %ld\nstrlen(u_haystack): %ld\n", strlen(haystack), strlen(u_haystack));
-			printf("haystack: %s\nu_haystack: %s\nneedle: %s\n", haystack, u_haystack, needle);
-			printf("strstr(u_haystack, needle): strstr(%s, %s)\n", u_haystack, needle);
-		}
-
-		if ( strstr(u_haystack, needle) != NULL ){ return 1; }
-	}
-
-	return 0;
-}
-
 int main(void) {
 	//String reading
 	char response[MAX_BYTES] = {0};
@@ -230,7 +210,7 @@ int main(void) {
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
-		if ( b_stristr(response, "RSET") == 1 ) {
+		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
@@ -238,7 +218,7 @@ int main(void) {
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
-		if ( b_stristr(response, "QUIT") == 1 ) {
+		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
 			printf("221 2.0.0 Bye\n");
@@ -248,7 +228,7 @@ int main(void) {
 	//
 
 	//Did they even attempt to HELO or EHLO?
-	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
+	if ( strcasestr(response, "EHLO") == NULL && strcasestr(response, "HELO") == NULL ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));											//Give them another chance to issue a valid SMTP command
@@ -257,7 +237,7 @@ int main(void) {
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
-		if ( b_stristr(response, "RSET") == 1 ) {
+		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
@@ -265,7 +245,7 @@ int main(void) {
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
-		if ( b_stristr(response, "QUIT") == 1 ) {
+		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
 			printf("221 2.0.0 Bye\n");
@@ -275,7 +255,7 @@ int main(void) {
 	//
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
-	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
+	if ( strcasestr(response, "EHLO") == NULL && strcasestr(response, "HELO") == NULL ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
@@ -285,7 +265,7 @@ int main(void) {
 
 	//Did they EHLO instead of HELO?  Get the next line potentially RCPT TO
 	Random_Wait();
-	if ( b_stristr(response, "EHLO") == 1 ) {
+	if ( strcasestr(response, "EHLO") != NULL ) {
 		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
@@ -298,7 +278,7 @@ int main(void) {
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
-		if ( b_stristr(response, "RSET") == 1 ) {
+		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
@@ -306,7 +286,7 @@ int main(void) {
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
-		if ( b_stristr(response, "QUIT") == 1 ) {
+		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
 			printf("221 2.0.0 Bye\n");
@@ -323,7 +303,7 @@ int main(void) {
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
-		if ( b_stristr(response, "RSET") == 1 ) {
+		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
@@ -331,7 +311,7 @@ int main(void) {
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
-		if ( b_stristr(response, "QUIT") == 1 ) {
+		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
 			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
 			printf("221 2.0.0 Bye\n");
