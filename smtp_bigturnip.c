@@ -35,6 +35,8 @@
  *		   - Looks stable now, learned a ton today about C pointers and memory allocation.  I am a REAL BOY now!  Yay!
  *	2022-08-30 - Safe C handling via toupper() from string.h already used; thanks to DH for the help and knowledge.
  *		   - Make debug easy
+ *		   - Better RSET and QUIT handling
+ *		   - Proper handling of needle and haystack ordering (doh!)
  *
 */
 
@@ -78,7 +80,7 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 	//Make sure only printed is returned \0 terminated string, then \n
 	for(ch=0; ch<strlen(buff); ch++) {
 
-		if ( DEBUG == 1 ) { printf("%x\n", buff[ch] & 0xff); }
+		if ( DEBUG == 1 ) { printf("getLine chr: %x\n", buff[ch] & 0xff); }
 
 		//Turn all CR into LF
 		if ( buff[ch] == '\r' ) {
@@ -198,20 +200,21 @@ static int b_stristr(char *haystack, char *needle){
 
 	//Certainly the SMTP command is too long if it exceeds MAX_BYTES and this is just a just in case boundary check.
 	//sizeof() is the buffer size, strlen() is the filled buffer state.
-	if ( sizeof(haystack) <= MAX_BYTES && strlen(haystack) <= MAX_BYTES && sizeof(needle) < MAX_BYTES && strlen(needle) < MAX_BYTES ) {
-		//Perform a deep buffer-based copy based on transformation of needle to upper case u_needle using strlen() which is the filled buffer state.
-		for( uc = 0; uc <= strlen(haystack) && uc <= sizeof(haystack); uc++ ){ u_haystack[uc] = toupper(haystack[uc]); }
+	if ( sizeof(haystack) <= MAX_BYTES && sizeof(needle) < MAX_BYTES && strlen(haystack) <= MAX_BYTES && strlen(needle) < MAX_BYTES ) {
+		//Perform a deep buffer-based copy based on transformation of haystack to upper case u_haystack
+		for( uc = 0; uc <= strlen(haystack); uc++ ){ u_haystack[uc] = toupper(haystack[uc]); }
 
 		if ( DEBUG == 1 ) {
 			printf("sizeof(haystack): %ld\nsizeof(u_haystack): %ld\n", sizeof(haystack), sizeof(u_haystack));
 			printf("strlen(haystack): %ld\nstrlen(u_haystack): %ld\n", strlen(haystack), strlen(u_haystack));
-			printf("haystack: %s\nu_haystack: %s\n", haystack, u_haystack);
+			printf("haystack: %s\nu_haystack: %s\nneedle: %s\n", haystack, u_haystack, needle);
+			printf("strstr(u_haystack, needle): strstr(%s, %s)\n", u_haystack, needle);
 		}
 
-		if ( strstr(needle, u_haystack) != NULL ){ return 1; }
+		if ( strstr(u_haystack, needle) != NULL ){ return 1; }
 	}
 
-	return(0);
+	return 0;
 }
 
 int main(void) {
@@ -225,27 +228,51 @@ int main(void) {
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
-	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them free data like a participation trophy so they feel better about themselves!
-	if ( b_stristr(response, "QUIT") == 1 ) {
-		Entropy_Engine();
-		return 0;
-	}
+	//RSET and QUIT handler
+		//Did they issue a RSET?
+		if ( b_stristr(response, "RSET") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
+			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		}
 
-	//Did they issue a RSET?
-	if ( b_stristr(response, "RSET") == 1 ) {
-		Random_Wait();
-		if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
-		rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));														//Likely MAIL FROM
-		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
-	}
+		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
+		if ( b_stristr(response, "QUIT") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			printf("221 2.0.0 Bye\n");
+			fflush(stdout);
+			return 0;
+		}
+	//
 
 	//Did they even attempt to HELO or EHLO?
 	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
-		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));	//Give them another chance to issue a valid SMTP command
+		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));											//Give them another chance to issue a valid SMTP command
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 	}
+
+	//RSET and QUIT handler
+		//Did they issue a RSET?
+		if ( b_stristr(response, "RSET") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
+			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		}
+
+		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
+		if ( b_stristr(response, "QUIT") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			printf("221 2.0.0 Bye\n");
+			fflush(stdout);
+			return 0;
+		}
+	//
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
 	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
@@ -269,11 +296,49 @@ int main(void) {
 		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
+	//RSET and QUIT handler
+		//Did they issue a RSET?
+		if ( b_stristr(response, "RSET") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
+			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		}
+
+		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
+		if ( b_stristr(response, "QUIT") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			printf("221 2.0.0 Bye\n");
+			fflush(stdout);
+			return 0;
+		}
+	//
+
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
 	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));															//Likely MAIL FROM
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+
+	//RSET and QUIT handler
+		//Did they issue a RSET?
+		if ( b_stristr(response, "RSET") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));													//Give them another chance to issue a valid SMTP command
+			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		}
+
+		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
+		if ( b_stristr(response, "QUIT") == 1 ) {
+			Random_Wait();
+			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			printf("221 2.0.0 Bye\n");
+			fflush(stdout);
+			return 0;
+		}
+	//
 
 	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
