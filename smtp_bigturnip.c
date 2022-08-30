@@ -33,6 +33,8 @@
  *		   - Working around 'warning: function returns address of local variable [-Wreturn-local-addr]' was a bitch.
  *		   - Education by failure, the best teacher, of all sessons.  Today I learned about strupr() and then I found it that it's not standard!  LOL!
  *		   - Looks stable now, learned a ton today about C pointers and memory allocation.  I am a REAL BOY now!  Yay!
+ *	2022-08-30 - Safe C handling via toupper() from string.h already used; thanks to DH for the help and knowledge.
+ *		   - Make debug easy
  *
 */
 
@@ -50,6 +52,8 @@
 #define NOT_OK		3
 
 #define MAX_BYTES	4096
+
+#define DEBUG		0
 
 static int getLine( char *prompt, char *buff, size_t sz) {
 	int ch		= 0;
@@ -73,8 +77,8 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 
 	//Make sure only printed is returned \0 terminated string, then \n
 	for(ch=0; ch<strlen(buff); ch++) {
-		//Debug
-		//printf("%x\n", buff[ch] & 0xff);
+
+		if ( DEBUG == 1 ) { printf("%x\n", buff[ch] & 0xff); }
 
 		//Turn all CR into LF
 		if ( buff[ch] == '\r' ) {
@@ -187,12 +191,33 @@ static int Entropy_Engine() {
 	return 0;
 }
 
+//One day I will look back at this and laugh at myself, but hey, we all learn.
+static int b_stristr(char *haystack, char *needle){
+	char u_haystack[MAX_BYTES] = {0};
+	int uc = 0;
+
+	//Certainly the SMTP command is too long if it exceeds MAX_BYTES and this is just a just in case boundary check.
+	//sizeof() is the buffer size, strlen() is the filled buffer state.
+	if ( sizeof(haystack) <= MAX_BYTES && strlen(haystack) <= MAX_BYTES && sizeof(needle) < MAX_BYTES && strlen(needle) < MAX_BYTES ) {
+		//Perform a deep buffer-based copy based on transformation of needle to upper case u_needle using strlen() which is the filled buffer state.
+		for( uc = 0; uc <= strlen(haystack) && uc <= sizeof(haystack); uc++ ){ u_haystack[uc] = toupper(haystack[uc]); }
+
+		if ( DEBUG == 1 ) {
+			printf("sizeof(haystack): %ld\nsizeof(u_haystack): %ld\n", sizeof(haystack), sizeof(u_haystack));
+			printf("strlen(haystack): %ld\nstrlen(u_haystack): %ld\n", strlen(haystack), strlen(u_haystack));
+			printf("haystack: %s\nu_haystack: %s\n", haystack, u_haystack);
+		}
+
+		if ( strstr(needle, u_haystack) != NULL ){ return 1; }
+	}
+
+	return(0);
+}
+
 int main(void) {
 	//String reading
-	char response[MAX_BYTES]	= {0};
-	char u_response[MAX_BYTES]	= {0};
+	char response[MAX_BYTES] = {0};
 	int rc = 0;
-	int uc = 0;
 
 	//Send the banner and get the response
 	Random_Wait();
@@ -200,42 +225,30 @@ int main(void) {
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
 
-	//Lets spend all day on a CS101 problem on converting a string to uppercase!
-	strncpy(u_response, response, sizeof(response));
-	for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
-
 	//Are they just wasting our time, enumerating and scanning for SMTP servers?  No one likes a quitter, give them free data like a participation trophy so they feel better about themselves!
-	if ( strstr(u_response, "QUIT") != NULL ) {
+	if ( b_stristr(response, "QUIT") == 1 ) {
 		Entropy_Engine();
 		return 0;
 	}
 
 	//Did they issue a RSET?
-	if ( strstr(u_response, "RSET") != NULL ) {
+	if ( b_stristr(response, "RSET") == 1 ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
 		rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));														//Likely MAIL FROM
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
-
-		//Lets spend all day on a CS101 problem on converting a string to uppercase!
-		strncpy(u_response, response, sizeof(response));
-		for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
 	}
 
 	//Did they even attempt to HELO or EHLO?
-	if ( strstr(u_response, "EHLO") == NULL && strstr(u_response, "HELO") == NULL ) {
+	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));	//Give them another chance to issue a valid SMTP command
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
-
-		//Lets spend all day on a CS101 problem on converting a string to uppercase!
-		strncpy(u_response, response, sizeof(response));
-		for (uc = 0; u_response[uc] != '\0'; uc++) { if(u_response[uc] >= 'a' && u_response[uc] <= 'z') { u_response[uc] = u_response[uc] - 32; } }
 	}
 
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
-	if ( strstr(u_response, "EHLO") == NULL && strstr(u_response, "HELO") == NULL ) {
+	if ( b_stristr(response, "EHLO") == 0 && b_stristr(response, "HELO") == 0 ) {
 		Random_Wait();
 		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
@@ -245,7 +258,7 @@ int main(void) {
 
 	//Did they EHLO instead of HELO?  Get the next line potentially RCPT TO
 	Random_Wait();
-	if ( strstr(u_response, "EHLO") != NULL ) {
+	if ( b_stristr(response, "EHLO") == 1 ) {
 		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
 		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
