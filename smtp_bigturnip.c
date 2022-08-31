@@ -39,6 +39,7 @@
  *		   - Proper handling of needle and haystack ordering (doh!)
  *		   - LOL, reading string.h to find out how to pass a NULL pointer and I found strcasestr().  EZ-PZ now?
  *		   - Blast the AUTH LOGIC idiots
+ *	2022-08-31 - Blast the AUTH NTLM idiots, heck, any of the AUTH morons.
  *
 */
 
@@ -227,8 +228,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH LOGIN folks looking for some wholesome data to gather?  Well, let us give it to them!
-		if ( strcasestr(response, "AUTH LOGIN") != NULL ) {
+		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL ) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -261,8 +262,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH LOGIN folks looking for some wholesome data to gather?  Well, let us give it to them!
-		if ( strcasestr(response, "AUTH LOGIN") != NULL ) {
+		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL ) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -309,8 +310,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH LOGIN folks looking for some wholesome data to gather?  Well, let us give it to them!
-		if ( strcasestr(response, "AUTH LOGIN") != NULL ) {
+		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL ) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -341,8 +342,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH LOGIN folks looking for some wholesome data to gather?  Well, let us give it to them!
-		if ( strcasestr(response, "AUTH LOGIN") != NULL ) {
+		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL ) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
