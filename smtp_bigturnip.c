@@ -40,6 +40,7 @@
  *		   - LOL, reading string.h to find out how to pass a NULL pointer and I found strcasestr().  EZ-PZ now?
  *		   - Blast the AUTH LOGIC idiots
  *	2022-08-31 - Blast the AUTH NTLM idiots, heck, any of the AUTH morons.
+ *		   - Add a little Slowloris style fun to the EntropyEngine(). :)
  *
 */
 
@@ -73,18 +74,18 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 		fflush(stdout);
 	}
 
-	if (fgets(buff, sz, stdin) == NULL)
+	if ( fgets(buff, sz, stdin) == NULL )
 		return NO_INPUT;
 
 	//Flush to newline and indicate it was too long
-	if (buff[strlen(buff)-1] != '\n') {
+	if ( buff[strlen(buff)-1] != '\n' ) {
 		extra = 0;
-		while( ((ch = getchar()) != '\n') && (ch != EOF) ) { extra = 1; }
+		while ( ((ch = getchar()) != '\n') && (ch != EOF) ) { extra = 1; }
 		return (extra == 1) ? TOO_LONG: OK;
 	}
 
 	//Make sure only printed is returned \0 terminated string, then \n
-	for(ch=0; ch<strlen(buff); ch++) {
+	for ( ch=0; ch<strlen(buff); ch++ ) {
 
 		if ( DEBUG == 1 ) { printf("getLine chr: %x\n", buff[ch] & 0xff); }
 
@@ -160,8 +161,8 @@ static int Random_Wait() {
 	//Init rand()
 	srand((unsigned)time(NULL));
 	urandom = fopen("/dev/urandom", "r");
-	if (urandom != NULL) {
-		if( fread (&seed, sizeof(seed), 1, urandom) == 1 ) { srand(seed); }
+	if ( urandom != NULL ) {
+		if ( fread (&seed, sizeof(seed), 1, urandom) == 1 ) { srand(seed); }
 		fclose(urandom);
 	}
 
@@ -177,20 +178,21 @@ static int Entropy_Engine() {
 	//Summon the chaos entropy engine output, where we stop, no one knows until we hit EOF.  There are no big bucks though, only whammies for miscreants.
 	//Not using feof() here because well, /dev/urandom is ... random.  No idea how big the buffer is until EOF so better to read a single character, I think.
 	FILE* urandom;
-	char random_data;
 	int data_count	= 0;
 	int rc		= 0;
+	char ch;
 
 	urandom = fopen("/dev/urandom", "r");
-	if (urandom != NULL) {
-		if (Validate_and_Log(rc, "Huff Entropy Engine Fumes Ya Bastard\n", 1) != 0) { return 1; }
+	if ( urandom != NULL ) {
+		if ( Validate_and_Log(rc, "Huff Entropy Engine Fumes Ya Bastard, slowloris style\n", 1) != 0 ) { return 1; }
+
 		//Full disclosure here, I decided I liked the number 32 :)
-		for(data_count = 0; data_count < 32; data_count++) {
-			do {
-				random_data = fgetc(urandom);
-				printf("%c", random_data);
+		for ( data_count = 0; data_count < 32; data_count++ ) {
+			while ( (ch = fgetc(urandom)) != EOF ) {
+				Random_Wait();		//slowloris, heh
+				printf("%c", ch);
 				fflush(stdout);
-			} while (data_count != EOF);
+			}
 		}
 		fclose(urandom);
 	}
@@ -206,23 +208,23 @@ int main(void) {
 
 	//Send the banner and get the response
 	Random_Wait();
-	if (Validate_and_Log(rc, "220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", 1) != 0) { return 1; }
+	if ( Validate_and_Log(rc, "220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", 1 ) != 0) { return 1; }
 	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
-	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
-			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
 		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0 ) { return 1; }
 			printf("221 2.0.0 Bye\n");
 			fflush(stdout);
 			return 0;
@@ -239,24 +241,24 @@ int main(void) {
 	//Did they even attempt to HELO or EHLO?
 	if ( strcasestr(response, "EHLO") == NULL && strcasestr(response, "HELO") == NULL ) {
 		Random_Wait();
-		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
+		if ( Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0 ) { return 1; }
 		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));			//Give them another chance to issue a valid SMTP command
-		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
-			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
 		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0 ) { return 1; }
 			printf("221 2.0.0 Bye\n");
 			fflush(stdout);
 			return 0;
@@ -273,7 +275,7 @@ int main(void) {
 	//If they're still being stupid here and cannot HELO or HELO lets terminate the connection
 	if ( strcasestr(response, "EHLO") == NULL && strcasestr(response, "HELO") == NULL ) {
 		Random_Wait();
-		if (Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0) { return 1; }
+		if ( Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1 ) != 0) { return 1; }
 		printf("502 5.5.2 Error: command not recognized\n");
 		fflush(stdout);
 		return 1;
@@ -282,29 +284,29 @@ int main(void) {
 	//Did they EHLO instead of HELO?  Get the next line potentially RCPT TO
 	Random_Wait();
 	if ( strcasestr(response, "EHLO") != NULL ) {
-		if (Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1) != 0) { return 1; }
+		if ( Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1 ) != 0) { return 1; }
 		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
-		if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}else{
 	//Must be a HELO then, get the next line potentially RCPT TO
-		if (Validate_and_Log(rc, "250 localhost\n", 1) != 0) { return 1; }
+		if ( Validate_and_Log(rc, "250 localhost\n", 1) != 0 ) { return 1; }
 		rc  = getLine("250 localhost\n", response, sizeof(response));						//Likely RCPT TO
-		if (Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
+		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
-			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
 		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0 ) { return 1; }
 			printf("221 2.0.0 Bye\n");
 			fflush(stdout);
 			return 0;
@@ -320,23 +322,23 @@ int main(void) {
 
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
-	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+	if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely MAIL FROM
-	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//RSET and QUIT handler
 		//Did they issue a RSET?
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
-			if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
 		//Are they just wasting our time, enumerating and scanning for SMTP servers with minimal interaction?
 		if ( strcasestr(response, "QUIT") != NULL ) {
 			Random_Wait();
-			if (Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0) { return 1; }
+			if ( Validate_and_Log(rc, "221 2.0.0 Bye\n", 1) != 0 ) { return 1; }
 			printf("221 2.0.0 Bye\n");
 			fflush(stdout);
 			return 0;
@@ -352,9 +354,9 @@ int main(void) {
 
 	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
-	if (Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0) { return 1; }
+	if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
 	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely DATA or BDAT
-	if (Validate_and_Log(rc, response, 0) != 0) { return 1; }
+	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//If the connection is still here, lets assume they're jerks, and nard kick 'em with some Entropy.
 	Entropy_Engine();
