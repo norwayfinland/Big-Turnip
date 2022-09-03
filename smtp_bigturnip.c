@@ -41,6 +41,15 @@
  *		   - Blast the AUTH LOGIC idiots
  *	2022-08-31 - Blast the AUTH NTLM idiots, heck, any of the AUTH morons.
  *		   - Add a little Slowloris style fun to the EntropyEngine(). :)
+ *	2022-09-03 - Various improvements to logic
+ *		   - STARTTLS handling similar to AUTH; we never advertise STARTTLS support in EHLO.
+ *		   - Increase MAX_BYTES to 8192 from 4096; syslog-ng by default handles up to 8192 bytes unless log_msg_size{} is adjusted.  Remember kids,
+ *		     unless using TCP this value has little to no bearing for forwarded messages.  If the UDP datagram exceeds the line MTU in bytes,
+ *		     which is usually 1500 bytes there is no UDP fragmentation and reassembly.  The datagram is simply too large and is discarded at the
+ *		     application layer.  Use TCP for successful log transport.
+ *		   - More granular handling of TOO_LONG condition
+ *		   - Get rid of ternary operation of TOO_LONG:OK
+ *		   - Better debugging in getLine() and renamed getLine() to SafeGetLine()
  *
 */
 
@@ -60,11 +69,11 @@
 #define TOO_LONG	2
 #define NOT_OK		3
 
-#define MAX_BYTES	4096
+#define MAX_BYTES	8192
 
 #define DEBUG		0
 
-static int getLine( char *prompt, char *buff, size_t sz) {
+static int SafeGetLine(char *prompt, char *buff, size_t sz) {
 	int ch		= 0;
 	int extra	= 0;
 
@@ -74,20 +83,30 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 		fflush(stdout);
 	}
 
-	if ( fgets(buff, sz, stdin) == NULL )
+	//Read from stdin, if nothing sent, return NO_INPUT
+	if ( fgets(buff, sz, stdin) == NULL ) {
+		if ( DEBUG != 0 ) { printf("SafeGetLine(): NO_INPUT\n"); }
 		return NO_INPUT;
+	}
 
-	//Flush to newline and indicate it was too long
-	if ( buff[strlen(buff)-1] != '\n' ) {
-		extra = 0;
-		while ( ((ch = getchar()) != '\n') && (ch != EOF) ) { extra = 1; }
-		return (extra == 1) ? TOO_LONG: OK;
+	//Ensure our read is sane and does not exceed the buffers.  SMTP commands are not multi-line.
+	if ( strlen(buff) >= MAX_BYTES || sizeof(buff) > MAX_BYTES || sz > MAX_BYTES ) {
+		if ( DEBUG != 0 ) { printf("SafeGetLine(): TOO_LONG_1\n"); }
+		return TOO_LONG;
+	}
+
+	//Run a garbage collection on the rest of stdin if there is still input being sent over the TCP socket; discard the data and mark as TOO_LONG.
+        if ( buff[strlen(buff)-1] != '\n' ) {
+                while ( ((ch = getchar()) != '\n') && (ch != EOF) ) { extra = 1; }	//Lazy discard read one chr() at a time until they are done
+		if ( extra == 1 ) {
+			if ( DEBUG != 0 ) { printf("SafeGetLine(): TOO_LONG_2\n"); }
+			return TOO_LONG;
+		}
 	}
 
 	//Make sure only printed is returned \0 terminated string, then \n
-	for ( ch=0; ch<strlen(buff); ch++ ) {
-
-		if ( DEBUG == 1 ) { printf("getLine chr: %x\n", buff[ch] & 0xff); }
+	for ( ch = 0; ch < strlen(buff); ch++ ) {
+		if ( DEBUG == 2 ) { printf("SafeGetLine():  chr %x\n", buff[ch] & 0xff); }
 
 		//Turn all CR into LF
 		if ( buff[ch] == '\r' ) {
@@ -98,13 +117,15 @@ static int getLine( char *prompt, char *buff, size_t sz) {
 		}
 
 		//Throw an error if it's not printable, permit newline.
-		if ( buff[ch] != '\n' ) {
-			if ( isprint(buff[ch]) == 0 ) { return NOT_OK; }
+		if ( buff[ch] != '\n' && isprint(buff[ch]) == 0 ) {
+			if ( DEBUG != 0 ) { printf("SafeGetLine(): NOT_OK\n"); }
+			return NOT_OK;
 		}
 	}
 
-	//All ok, return the string to the caller
+	//All ok, return the string to the caller explicitly marking NULL termination
 	buff[strlen(buff)-1] = '\0';
+	if ( DEBUG != 0 ) { printf("SafeGetLine(): OK\n\tstrlen(buff): %ld\n\tsizeof(buff): %ld\n", strlen(buff), sizeof(buff)); }
 	return OK;
 }
 
@@ -128,7 +149,6 @@ static int Validate_and_Log (int rc, char *response, int is_outbound) {
 			syslog(LOG_NOTICE, "< %s", "*** UNPRINTABLE CHARACTERS DETECTED - LOOK AT PCAPS ***");
 			closelog();
 		}
-
 
 		//Error handling
 		openlog("SMTP_BIGTURNIP", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
@@ -209,7 +229,7 @@ int main(void) {
 	//Send the banner and get the response
 	Random_Wait();
 	if ( Validate_and_Log(rc, "220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", 1 ) != 0) { return 1; }
-	rc  = getLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
+	rc  = SafeGetLine("220 localhost ESMTP Use of this system for unsolicited electronic mail advertisements (UCE), SPAM, or malicious content is forbidden.\n", response, sizeof(response));
 	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//RSET and QUIT handler
@@ -217,7 +237,7 @@ int main(void) {
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
+			rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
 			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
@@ -230,8 +250,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
-		if ( strcasestr(response, "AUTH ") != NULL ) {
+		//Are they AUTH or STARTTLS folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL || strcasestr(response, "STARTTLS") != NULL) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -242,7 +262,7 @@ int main(void) {
 	if ( strcasestr(response, "EHLO") == NULL && strcasestr(response, "HELO") == NULL ) {
 		Random_Wait();
 		if ( Validate_and_Log(rc, "502 5.5.2 Error: command not recognized\n", 1) != 0 ) { return 1; }
-		rc = getLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));			//Give them another chance to issue a valid SMTP command
+		rc = SafeGetLine("502 5.5.2 Error: command not recognized\n", response, sizeof(response));			//Give them another chance to issue a valid SMTP command
 		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
@@ -251,7 +271,7 @@ int main(void) {
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
+			rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
 			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
@@ -264,8 +284,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
-		if ( strcasestr(response, "AUTH ") != NULL ) {
+		//Are they AUTH or STARTTLS folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL || strcasestr(response, "STARTTLS") != NULL) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -285,12 +305,12 @@ int main(void) {
 	Random_Wait();
 	if ( strcasestr(response, "EHLO") != NULL ) {
 		if ( Validate_and_Log(rc, "250-localhost\\n250-PIPELINING\\n250-SIZE 20480000\\n250-VRFY\\n250-ETRN\\n250-ENHANCEDSTATUSCODES\\n250-8BITMIME\\n250 DSN\\n", 1 ) != 0) { return 1; }
-		rc = getLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
+		rc = SafeGetLine("250-localhost\n250-PIPELINING\n250-SIZE 20480000\n250-VRFY\n250-ETRN\n250-ENHANCEDSTATUSCODES\n250-8BITMIME\n250 DSN\n", response, sizeof(response));	//Likely RCPT TO
 		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}else{
 	//Must be a HELO then, get the next line potentially RCPT TO
 		if ( Validate_and_Log(rc, "250 localhost\n", 1) != 0 ) { return 1; }
-		rc  = getLine("250 localhost\n", response, sizeof(response));						//Likely RCPT TO
+		rc  = SafeGetLine("250 localhost\n", response, sizeof(response));						//Likely RCPT TO
 		if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 	}
 
@@ -299,7 +319,7 @@ int main(void) {
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
+			rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
 			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
@@ -312,8 +332,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
-		if ( strcasestr(response, "AUTH ") != NULL ) {
+		//Are they AUTH or STARTTLS folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL || strcasestr(response, "STARTTLS") != NULL) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -323,7 +343,7 @@ int main(void) {
 	//Get the next command before auto-starting the entropy engine, potentially MAIL FROM
 	Random_Wait();
 	if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely MAIL FROM
+	rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely MAIL FROM
 	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//RSET and QUIT handler
@@ -331,7 +351,7 @@ int main(void) {
 		if ( strcasestr(response, "RSET") != NULL ) {
 			Random_Wait();
 			if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-			rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
+			rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));					//Give them another chance to issue a valid SMTP command
 			if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 		}
 
@@ -344,8 +364,8 @@ int main(void) {
 			return 0;
 		}
 
-		//Are they AUTH folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
-		if ( strcasestr(response, "AUTH ") != NULL ) {
+		//Are they AUTH or STARTTLS folks looking for some wholesome data to gather?  Well, let us give it to them!  Note the trailing 0x20 in the double 0x22.
+		if ( strcasestr(response, "AUTH ") != NULL || strcasestr(response, "STARTTLS") != NULL) {
 			Random_Wait();
 			Entropy_Engine();
 			return 0;
@@ -355,10 +375,11 @@ int main(void) {
 	//Get the final command before auto-starting the entropy engine, likely DATA or BDAT
 	Random_Wait();
 	if ( Validate_and_Log(rc, "250 2.1.0 OK\n", 1) != 0 ) { return 1; }
-	rc  = getLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely DATA or BDAT
+	rc  = SafeGetLine("250 2.1.0 OK\n", response, sizeof(response));							//Likely DATA or BDAT
 	if ( Validate_and_Log(rc, response, 0) != 0 ) { return 1; }
 
 	//If the connection is still here, lets assume they're jerks, and nard kick 'em with some Entropy.
+	Random_Wait();
 	Entropy_Engine();
 	return 0;
 }
