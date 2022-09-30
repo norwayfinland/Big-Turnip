@@ -1,0 +1,33 @@
+image: docker:latest
+services:
+  - docker:dind
+
+stages:
+  - build
+  - deploy
+
+variables:
+  CONTAINER_IMAGE: bigturnip:latest
+
+build:
+  stage: build
+  script:
+    - hostname
+    - cat /etc/resolv.conf
+    - whoami
+    - docker login gitlab.example.com:5050 -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
+    - docker build -t gitlab.example.com:5050/project/bigturnip .
+    - docker push gitlab.example.com:5050/prject/${CONTAINER_IMAGE}
+
+deploy:
+  image: gitlab.example.com:5050/project/helm-kubectl:latest
+  stage: deploy
+  script:
+    - sed -i "s/<VERSION>/latest/g" deployment.yaml
+    - cat deployment.yaml
+    - hostname
+    - which kubectl
+    - if [ `kubectl get pod -n gitlab-runner |grep bigturnip| wc -l` -gt 0 ]; then kubectl delete deployment bigturnip -n gitlab-runner; fi;
+    - sleep 60
+    - kubectl apply -f deployment.yaml
+

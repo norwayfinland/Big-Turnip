@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bigturnip
+  labels:
+    app: bigturnip
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bigturnip
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 0
+  template:
+    metadata:
+      labels:
+        app: bigturnip
+    spec:
+      volumes:
+        - name: syslogdata
+          hostPath:
+            path: /shared/bigturnip
+      containers:
+        - name: bigturnip
+          image: gitlab.example.com:5050/project/bigturnip:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 31338
+          volumeMounts:
+            - name: syslogdata
+              mountPath: /var/log
+              readOnly: false
+      imagePullSecrets:
+        - name: registrypullsecret
+      dnsPolicy: "None"
+      dnsConfig:
+        nameservers:
+        - 10.0.0.1
+        searches:
+        - example.com
+        options:
+        - name: ndots
+          value: "1"
+        - name: timeout
+          value: "3"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bigturnip
+  labels:
+    name: bigturnip
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  ports:
+    - nodePort: 31338
+      port: 31338
+      targetPort: 31338
+      name: bigturnip
+  selector:
+    app: bigturnip
