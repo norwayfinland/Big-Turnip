@@ -25,5 +25,6 @@ COPY ./honeypot_bigturnip /etc/xinetd.d/
 WORKDIR /honeypot
 
 RUN gcc -Wall -D_FORTIFY_SOURCE=2 -O2 -fPIE -pie -fstack-protector -o smtp_bigturnip smtp_bigturnip.c
+RUN strip ./smtp_bigturnip
 
 ENTRYPOINT [ "xinetd", "-dontfork" ]
